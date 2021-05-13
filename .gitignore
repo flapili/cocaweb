@@ -129,3 +129,6 @@ dmypy.json
 .pyre/
 ecosystem.config.js
 .vscode
+.bash_history
+.pm2
+.ssh
