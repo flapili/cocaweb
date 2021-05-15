@@ -44,6 +44,7 @@ export default {
         "@/plugins/api",
         "@/plugins/common-function",
         "@/plugins/element-ui",
+        "@/plugins/vue-echarts",
     ],
 
     // Auto import components: https://go.nuxtjs.dev/config-components
@@ -67,6 +68,7 @@ export default {
         icons: {
             solid: [
                 "faSignOutAlt",
+                "faSignInAlt",
                 "faHome",
                 "faChartLine",
             ],

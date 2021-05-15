@@ -3,7 +3,8 @@ import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, status
+from pydantic import conint
 
 from modularapi.db import db
 
@@ -12,14 +13,9 @@ from .models import GetLeaderboardResponse, GetGuildResponse
 from .utils import datetime_to_id, id_to_datetime
 
 
-from modules.discord_Oauth2 import utils as discord_Oauth2_utils
-
-
 def on_load(app: FastAPI):
     module_name = Path(__file__).parent.parts[-1]
-    router = APIRouter(
-        prefix=f"/api/{module_name}", tags=[module_name], dependencies=[Depends(discord_Oauth2_utils.get_current_user)]
-    )
+    router = APIRouter(prefix=f"/api/{module_name}", tags=[module_name])
 
     @router.get("")
     async def get():
@@ -128,5 +124,73 @@ def on_load(app: FastAPI):
         for c in d["channels"]:
             del c["guild_id"]
         return d
+
+    @router.get("/messages_per_channel")
+    async def get_messages_per_channel(
+        guild_id: int,
+        intervals: conint(gt=0, lt=1001) = 100,
+        after: Optional[datetime.datetime] = None,
+        before: Optional[datetime.datetime] = None,
+    ):
+
+        if after is None:
+            after = id_to_datetime(guild_id)
+        else:
+            after = after.replace(tzinfo=None)
+
+        if before is None:
+            before = datetime.datetime.utcnow()
+        else:
+            before = before.replace(tzinfo=None)
+
+        delta: datetime.timedelta = (before - after) / intervals
+
+        cases = []
+        for x in range(intervals):
+            id_low = datetime_to_id(after + delta * x)
+            id_high = datetime_to_id(after + delta * (x + 1)) - 1
+            cases.append((Message.id.between(id_low, id_high), id_to_datetime(id_low).isoformat()))
+
+        query = (
+            db.select(
+                [
+                    GuildTextChannel.name,
+                    db.func.count(Message.id).label("count"),
+                    db.case(cases).label("datetime"),
+                ]
+            )
+            .select_from(Message.join(GuildTextChannel, Message.channel_id == GuildTextChannel.id))
+            .where(Message.id.between(datetime_to_id(after), datetime_to_id(before, high=True)))
+            .where(Message.guild_id == guild_id)
+            .group_by(
+                GuildTextChannel.name,
+                "datetime",
+            )
+        )
+        channels: dict = {}
+        async with db.transaction():
+            async for channel, count, iso_datetime in query.gino.iterate():
+                channels[channel] = channels.get(channel, {})
+                channels[channel][iso_datetime] = count
+
+        # fill the holes
+        for channel in channels:
+            for _, iso_datetime in cases:
+                channels[channel][iso_datetime] = channels[channel].get(iso_datetime, 0)
+
+        if not channels:
+            return {"x_axis": [], "series": []}
+
+        first_key = list(channels)[0]
+        x_axis = list(sorted(channels[first_key], key=datetime.datetime.fromisoformat))
+        series = [
+            {
+                "name": channel,
+                "data": [channels[channel][x] for x in x_axis],
+            }
+            for channel in channels
+        ]
+
+        return {"x_axis": x_axis, "series": series}
 
     app.include_router(router)

@@ -132,3 +132,9 @@ ecosystem.config.js
 .bash_history
 .pm2
 .ssh
+.gnupg
+.local
+.yarn
+.yarnrc
+.nuxtrc
+core
